@@ -61,12 +61,12 @@ const isClerkConfigured = Boolean(clerkPubKey && !clerkPubKey.includes('example.
 const defaultStarterParts: Part[] = [
   {
     id: 1,
-    name: 'BLDC Motor 1000W',
+    name: 'BLDC Hub Motor 1000W 48V/60V',
     category: 'Motors',
     price: 8500,
-    description: 'A practical motor option for compatible EV builds.',
+    description: 'High-torque brushless DC rear hub motor with integrated alloy rim and heavy-duty phase wires.',
     icon: 'motor',
-    imageUrl: null,
+    imageUrl: '/parts/bldc-motor-1000w.jpg',
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-01T00:00:00.000Z',
   },
@@ -127,12 +127,55 @@ const defaultStarterParts: Part[] = [
   },
 ];
 
+export async function compressImageFile(file: File, maxWidth = 500, maxHeight = 500, quality = 0.8): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let { width, height } = img;
+        if (width > maxWidth || height > maxHeight) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(event.target?.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(event.target?.result as string);
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(file);
+  });
+}
+
 export function getLocalParts(): Part[] {
   try {
     const saved = localStorage.getItem('jyothi_ev_parts_catalog');
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((p) => {
+          const starterMatch = defaultStarterParts.find((s) => s.id === p.id);
+          if (starterMatch && !p.imageUrl && starterMatch.imageUrl) {
+            return { ...p, imageUrl: starterMatch.imageUrl };
+          }
+          return p;
+        });
+      }
     }
   } catch {
     // fallback
@@ -366,18 +409,27 @@ function AdminModal({
   onDelete: (id: number) => void | Promise<void>;
 }) {
   const [imagePreview, setImagePreview] = useState(part?.imageUrl ?? '');
+  const [isCompressing, setIsCompressing] = useState(false);
 
   useEffect(() => {
     setImagePreview(part?.imageUrl ?? '');
   }, [part]);
 
-  const handleImageChange = (file: File | undefined) => {
+  const handleImageChange = async (file: File | undefined) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       setImagePreview(part?.imageUrl ?? '');
       return;
     }
-    setImagePreview(URL.createObjectURL(file));
+    setIsCompressing(true);
+    try {
+      const compressedDataUrl = await compressImageFile(file, 600, 600, 0.85);
+      setImagePreview(compressedDataUrl);
+    } catch {
+      setImagePreview(part?.imageUrl ?? '');
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
   return (
@@ -395,14 +447,26 @@ function AdminModal({
           </div>
           <label className="grid gap-2 text-xs font-semibold">Part visual<select required name="icon" defaultValue={part?.icon ?? 'controller'} className="rounded-xl border border-[var(--line)] bg-[var(--shell)] px-4 py-3 text-sm outline-none focus:border-[var(--teal)]" data-testid="input-admin-icon">{(['motor', 'controller', 'display', 'charger', 'brake', 'battery'] as PartIcon[]).map((icon) => <option key={icon} value={icon}>{icon.charAt(0).toUpperCase() + icon.slice(1)}</option>)}</select></label>
            <div className="grid gap-3">
-             <label className="grid gap-2 text-xs font-semibold">Product image <input type="file" name="image" accept="image/png,image/jpeg,image/webp" onChange={(event) => handleImageChange(event.target.files?.[0])} className="rounded-xl border border-dashed border-[var(--line)] bg-[rgba(255,255,255,.22)] px-4 py-3 text-sm file:mr-3 file:rounded-full file:border-0 file:bg-[var(--ink)] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[var(--shell)]" data-testid="input-admin-image" /></label>
-             {imagePreview ? <div className="relative h-32 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--ink)]"><img src={imagePreview} alt="Selected product preview" className="h-full w-full object-cover" /><button type="button" onClick={() => setImagePreview('')} className="absolute right-3 top-3 rounded-full bg-[var(--shell)] px-3 py-1.5 text-[11px] font-bold text-[var(--ink)]" data-testid="button-admin-clear-image">Remove image</button></div> : <p className="text-xs text-[rgba(27,42,60,.55)]">Optional. Use a clear JPG, PNG or WebP image up to 5 MB.</p>}
-             <input type="hidden" name="imageUrl" value={imagePreview.startsWith('blob:') ? '' : imagePreview} readOnly />
+             <label className="grid gap-2 text-xs font-semibold">
+               Product image
+               <input type="file" name="image" accept="image/png,image/jpeg,image/webp" onChange={(event) => handleImageChange(event.target.files?.[0])} className="rounded-xl border border-dashed border-[var(--line)] bg-[rgba(255,255,255,.22)] px-4 py-3 text-sm file:mr-3 file:rounded-full file:border-0 file:bg-[var(--ink)] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[var(--shell)]" data-testid="input-admin-image" />
+             </label>
+             {isCompressing ? (
+               <p className="text-xs text-[var(--teal)]">Optimizing image…</p>
+             ) : imagePreview ? (
+               <div className="relative h-36 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--ink)]">
+                 <img src={imagePreview} alt="Selected product preview" className="h-full w-full object-cover" />
+                 <button type="button" onClick={() => setImagePreview('')} className="absolute right-3 top-3 rounded-full bg-[var(--shell)] px-3 py-1.5 text-[11px] font-bold text-[var(--ink)] shadow" data-testid="button-admin-clear-image">Remove image</button>
+               </div>
+             ) : (
+               <p className="text-xs text-[rgba(27,42,60,.55)]">Optional. Use a clear JPG, PNG or WebP image.</p>
+             )}
+             <input type="hidden" name="imageUrl" value={imagePreview} readOnly />
            </div>
           <label className="grid gap-2 text-xs font-semibold">Short description<textarea required name="description" rows={3} defaultValue={part?.description ?? ''} placeholder="A short, helpful description customers can understand." className="resize-none rounded-xl border border-[var(--line)] bg-transparent px-4 py-3 text-sm outline-none transition-colors placeholder:text-[rgba(27,42,60,.4)] focus:border-[var(--teal)]" data-testid="input-admin-description" /></label>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
             {part ? <button type="button" onClick={() => onDelete(part.id)} className="text-sm font-semibold text-[var(--coral)] underline underline-offset-4" data-testid="button-admin-delete">Remove this part</button> : <span />}
-            <button type="submit" className="flex items-center gap-2 rounded-full bg-[var(--ink)] px-5 py-3.5 text-sm font-semibold text-[var(--shell)] transition-transform hover:-translate-y-0.5" data-testid="button-admin-save">{part ? 'Save changes' : 'Add part'} <Check size={15} /></button>
+            <button type="submit" disabled={isCompressing} className="flex items-center gap-2 rounded-full bg-[var(--ink)] px-5 py-3.5 text-sm font-semibold text-[var(--shell)] transition-transform hover:-translate-y-0.5 disabled:opacity-50" data-testid="button-admin-save">{part ? 'Save changes' : 'Add part'} <Check size={15} /></button>
           </div>
         </form>
       </div>
@@ -449,8 +513,8 @@ function AdminDashboard() {
     const price = Number(form.get('price') ?? 0);
     const description = String(form.get('description') ?? '').trim();
     const icon = String(form.get('icon') ?? 'controller') as PartIcon;
-    const selectedImage = form.get('image');
-    const imageFile = selectedImage instanceof File && selectedImage.size > 0 ? selectedImage : null;
+    const finalImageUrl = String(form.get('imageUrl') ?? '').trim() || null;
+
     if (!name || !description || !Number.isInteger(price) || price < 0) {
       setFormError('Add a name, description and whole-number price.');
       return;
@@ -460,15 +524,6 @@ function AdminDashboard() {
     setFormError('');
 
     try {
-      let finalImageUrl = String(form.get('imageUrl') ?? '') || null;
-      if (imageFile) {
-        finalImageUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(imageFile);
-        });
-      }
-
       const currentParts = getLocalParts();
       let updatedParts: Part[];
 
@@ -482,7 +537,7 @@ function AdminDashboard() {
                 price,
                 description,
                 icon,
-                imageUrl: finalImageUrl || p.imageUrl,
+                imageUrl: finalImageUrl,
                 updatedAt: new Date().toISOString(),
               }
             : p
