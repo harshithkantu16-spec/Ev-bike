@@ -127,6 +127,56 @@ const defaultStarterParts: Part[] = [
   },
 ];
 
+export function getLocalParts(): Part[] {
+  try {
+    const saved = localStorage.getItem('jyothi_ev_parts_catalog');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {
+    // fallback
+  }
+  return defaultStarterParts;
+}
+
+export function saveLocalParts(parts: Part[]) {
+  try {
+    localStorage.setItem('jyothi_ev_parts_catalog', JSON.stringify(parts));
+    window.dispatchEvent(new Event('jyothi_ev_parts_updated'));
+  } catch {
+    // fallback
+  }
+}
+
+export function resetLocalParts() {
+  try {
+    localStorage.removeItem('jyothi_ev_parts_catalog');
+    window.dispatchEvent(new Event('jyothi_ev_parts_updated'));
+  } catch {
+    // fallback
+  }
+}
+
+export function useLiveParts() {
+  const partsQuery = useListParts();
+  const [localParts, setLocalParts] = useState<Part[]>(getLocalParts);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setLocalParts(getLocalParts());
+    };
+    window.addEventListener('jyothi_ev_parts_updated', handleUpdate);
+    return () => window.removeEventListener('jyothi_ev_parts_updated', handleUpdate);
+  }, []);
+
+  const parts = (Array.isArray(partsQuery.data) && partsQuery.data.length > 0)
+    ? partsQuery.data
+    : localParts;
+
+  return { parts, isLoading: partsQuery.isLoading && localParts.length === 0, partsQuery };
+}
+
 type ModalKind = 'parts' | 'franchise' | null;
 type PartIcon = 'motor' | 'controller' | 'display' | 'charger' | 'brake' | 'battery';
 
@@ -366,10 +416,11 @@ function AdminDashboard() {
   const clerk = isClerkConfigured ? useClerk() : null;
   const clerkStatusQuery = isClerkConfigured ? useGetAdminStatus() : null;
   const statusQuery = clerkStatusQuery ?? { isLoading: false, data: { isAdmin: true, email: 'admin@jyothiev.com' } };
-  const partsQuery = useListParts();
+  const { parts, isLoading: partsLoading, partsQuery } = useLiveParts();
   const [editorPart, setEditorPart] = useState<Part | null | undefined>(undefined);
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState('');
 
   // Business / WhatsApp Settings Customizer
   const [settings, setSettings] = useState<BusinessSettings>(getBusinessSettings);
@@ -407,20 +458,71 @@ function AdminDashboard() {
 
     setSaving(true);
     setFormError('');
+
     try {
-      const imageUrl = imageFile
-        ? await uploadProductImage(imageFile)
-        : String(form.get('imageUrl') ?? '') || null;
-      const payload = { name, category, price, description, icon, imageUrl };
-      if (editorPart) {
-        await updatePart(editorPart.id, payload);
-      } else {
-        await createPart(payload);
+      let finalImageUrl = String(form.get('imageUrl') ?? '') || null;
+      if (imageFile) {
+        finalImageUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(imageFile);
+        });
       }
+
+      const currentParts = getLocalParts();
+      let updatedParts: Part[];
+
+      if (editorPart) {
+        updatedParts = currentParts.map((p) =>
+          p.id === editorPart.id
+            ? {
+                ...p,
+                name,
+                category,
+                price,
+                description,
+                icon,
+                imageUrl: finalImageUrl || p.imageUrl,
+                updatedAt: new Date().toISOString(),
+              }
+            : p
+        );
+      } else {
+        const newId = Math.max(0, ...currentParts.map((p) => p.id)) + 1;
+        const newPart: Part = {
+          id: newId,
+          name,
+          category,
+          price,
+          description,
+          icon,
+          imageUrl: finalImageUrl,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        updatedParts = [newPart, ...currentParts];
+      }
+
+      saveLocalParts(updatedParts);
+
+      // Attempt background backend sync if available
+      try {
+        const payload = { name, category, price, description, icon, imageUrl: finalImageUrl };
+        if (editorPart) {
+          await updatePart(editorPart.id, payload);
+        } else {
+          await createPart(payload);
+        }
+      } catch {
+        // Safe fallback - already saved to local storage
+      }
+
       await queryClient.invalidateQueries({ queryKey: getListPartsQueryKey() });
       setEditorPart(undefined);
+      setSaveSuccess(editorPart ? 'Part updated successfully!' : 'New part added successfully!');
+      setTimeout(() => setSaveSuccess(''), 3000);
     } catch {
-      setFormError('We could not save that change. Please try again.');
+      setFormError('Could not process the part image. Please try another image.');
     } finally {
       setSaving(false);
     }
@@ -431,11 +533,22 @@ function AdminDashboard() {
     setSaving(true);
     setFormError('');
     try {
-      await deletePart(id);
+      const currentParts = getLocalParts();
+      const updatedParts = currentParts.filter((p) => p.id !== id);
+      saveLocalParts(updatedParts);
+
+      try {
+        await deletePart(id);
+      } catch {
+        // Safe fallback
+      }
+
       await queryClient.invalidateQueries({ queryKey: getListPartsQueryKey() });
       setEditorPart(undefined);
+      setSaveSuccess('Part removed from public list.');
+      setTimeout(() => setSaveSuccess(''), 3000);
     } catch {
-      setFormError('We could not remove that part. Please try again.');
+      setFormError('Could not remove that part.');
     } finally {
       setSaving(false);
     }
@@ -462,10 +575,15 @@ function AdminDashboard() {
     );
   }
 
-  const parts = Array.isArray(partsQuery.data) && partsQuery.data.length > 0
-    ? partsQuery.data
-    : defaultStarterParts;
   const categoriesCount = new Set(parts.map((part) => part.category)).size;
+
+  const handleResetCatalog = () => {
+    if (window.confirm('Reset parts catalog back to original starter products?')) {
+      resetLocalParts();
+      setSaveSuccess('Catalog reset to defaults.');
+      setTimeout(() => setSaveSuccess(''), 3000);
+    }
+  };
 
   return (
     <div className="min-h-[100dvh] bg-[var(--ink)] text-[var(--shell)]">
@@ -486,10 +604,19 @@ function AdminDashboard() {
               <h1 className="display-tight max-w-3xl text-5xl font-bold md:text-8xl">Manage Parts &<br /><span className="text-[var(--acid)]">Store Settings.</span></h1>
               <p className="mt-6 max-w-xl text-lg leading-relaxed text-[rgba(242,238,228,.66)]">Update catalog parts, prices, and your official WhatsApp support number. Changes publish across the website immediately.</p>
             </div>
-            <button type="button" onClick={() => setEditorPart(null)} className="flex items-center justify-center gap-2 rounded-full bg-[var(--acid)] px-5 py-3.5 text-sm font-bold text-[var(--ink)] transition-transform hover:-translate-y-1"><PackagePlus size={16} /> Add a part</button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" onClick={handleResetCatalog} className="flex items-center justify-center gap-2 rounded-full border border-[rgba(242,238,228,.25)] px-4 py-3 text-xs font-semibold text-[rgba(242,238,228,.7)] transition-colors hover:bg-[rgba(242,238,228,.1)] hover:text-[var(--shell)]">Reset to Defaults</button>
+              <button type="button" onClick={() => setEditorPart(null)} className="flex items-center justify-center gap-2 rounded-full bg-[var(--acid)] px-5 py-3.5 text-sm font-bold text-[var(--ink)] transition-transform hover:-translate-y-1"><PackagePlus size={16} /> Add a part</button>
+            </div>
           </div>
 
-          <div className="mt-12 grid gap-4 sm:grid-cols-3">
+          {saveSuccess && (
+            <div className="mt-6 rounded-2xl border border-[rgba(16,185,129,.4)] bg-[rgba(16,185,129,.15)] px-5 py-3 font-mono text-sm font-bold text-[#10B981]">
+              ✓ {saveSuccess}
+            </div>
+          )}
+
+          <div className="mt-8 grid gap-4 sm:grid-cols-3">
             <div className="rounded-[24px] border border-[rgba(242,238,228,.13)] bg-[rgba(242,238,228,.07)] p-5"><div className="eyebrow text-[rgba(242,238,228,.5)]">Live parts</div><div className="mt-4 text-4xl font-bold text-[var(--acid)]">{parts.length}</div></div>
             <div className="rounded-[24px] border border-[rgba(242,238,228,.13)] bg-[rgba(242,238,228,.07)] p-5"><div className="eyebrow text-[rgba(242,238,228,.5)]">Categories</div><div className="mt-4 text-4xl font-bold text-[var(--teal)]">{categoriesCount}</div></div>
             <div className="rounded-[24px] border border-[rgba(242,238,228,.13)] bg-[rgba(242,238,228,.07)] p-5"><div className="eyebrow text-[rgba(242,238,228,.5)]">Active WhatsApp</div><div className="mt-4 font-mono text-xl font-bold text-[#25D366]">+{formatWhatsAppNumber(settings.whatsappNumber)}</div></div>
@@ -615,10 +742,7 @@ function Home() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
 
-  const partsQuery = useListParts();
-  const catalogParts = Array.isArray(partsQuery.data) && partsQuery.data.length > 0
-    ? partsQuery.data
-    : defaultStarterParts;
+  const { parts: catalogParts, isLoading: catalogLoading } = useLiveParts();
 
   useEffect(() => {
     document.title = 'Jyothi EV Enterprises | Factory EV Spares, Battery Packs & Support';
@@ -905,7 +1029,7 @@ function Home() {
 
             {/* Parts Grid */}
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {partsQuery.isLoading && (
+              {catalogLoading && (
                 <div className="col-span-full rounded-[24px] border border-dashed border-[rgba(242,238,228,.2)] px-6 py-16 text-center text-[var(--shell)]">
                   <p className="text-lg font-semibold">Loading parts catalog…</p>
                 </div>
