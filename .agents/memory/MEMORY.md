@@ -1,0 +1,1 @@
+- [OpenAPI upload schemas](api-contract-codegen.md) — Keep upload metadata schema names distinct from operation-generated names and avoid Zod 4-only formats in this workspace.

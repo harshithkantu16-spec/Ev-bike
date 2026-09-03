@@ -1,0 +1,29 @@
+kind = "web"
+videoAspectRatio = "16:9"
+previewPath = "/"
+title = "Jyothi EV Enterprises"
+description = "A customer-facing website for Jyothi EV Enterprises, helping customers discover EV spare parts and learn about franchise opportunities with a clear, trustworthy brand experience."
+version = "1.0.0"
+id = "artifacts/jyothi-ev"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24167
+
+[services.development]
+run = "pnpm --filter @workspace/jyothi-ev run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/jyothi-ev", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/jyothi-ev/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24167"
+BASE_PATH = "/"

@@ -1,0 +1,11 @@
+{
+  "buildCommand": "pnpm --filter @workspace/jyothi-ev run build",
+  "outputDirectory": "artifacts/jyothi ev 1/dist/public",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
