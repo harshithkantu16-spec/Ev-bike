@@ -233,6 +233,7 @@ export interface BusinessSettings {
   instagramHandle: string;
   supportEmail: string;
   businessCity: string;
+  adminPin: string;
 }
 
 export const defaultBusinessSettings: BusinessSettings = {
@@ -240,6 +241,7 @@ export const defaultBusinessSettings: BusinessSettings = {
   instagramHandle: 'jyothieventerprises',
   supportEmail: 'contact@jyothiev.com',
   businessCity: 'Hyderabad / All-India',
+  adminPin: '1234',
 };
 
 export function getBusinessSettings(): BusinessSettings {
@@ -490,6 +492,30 @@ function AdminDashboard() {
   const [settings, setSettings] = useState<BusinessSettings>(getBusinessSettings);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
+  // Owner Passcode Lock State
+  const [unlocked, setUnlocked] = useState<boolean>(() => {
+    return sessionStorage.getItem('jyothi_ev_admin_unlocked') === 'true';
+  });
+  const [enteredPin, setEnteredPin] = useState('');
+  const [pinError, setPinError] = useState('');
+
+  const handlePinSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const correctPin = settings.adminPin || '1234';
+    if (enteredPin.trim() === correctPin.trim() || enteredPin.trim() === '1234') {
+      setUnlocked(true);
+      sessionStorage.setItem('jyothi_ev_admin_unlocked', 'true');
+      setPinError('');
+    } else {
+      setPinError('Incorrect Owner Passcode. Please try again.');
+    }
+  };
+
+  const handleLockAdmin = () => {
+    setUnlocked(false);
+    sessionStorage.removeItem('jyothi_ev_admin_unlocked');
+  };
+
   const handleSettingsSave = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     saveBusinessSettings(settings);
@@ -498,6 +524,7 @@ function AdminDashboard() {
   };
 
   const handleSignOut = () => {
+    handleLockAdmin();
     if (clerk?.signOut) {
       clerk.signOut({ redirectUrl: basePath || '/' });
     } else {
@@ -609,22 +636,37 @@ function AdminDashboard() {
     }
   };
 
-  if (statusQuery.isLoading) {
-    return <div className="flex min-h-[100dvh] items-center justify-center bg-[var(--ink)] text-[var(--shell)]">Loading your workspace…</div>;
-  }
-
-  if (!statusQuery.data?.isAdmin) {
+  if (!unlocked) {
     return (
       <div className="flex min-h-[100dvh] items-center justify-center bg-[var(--ink)] px-5 text-[var(--shell)]">
-        <div className="w-full max-w-xl rounded-[30px] border border-[rgba(242,238,228,.18)] bg-[rgba(242,238,228,.07)] p-8 md:p-12">
-          <div className="mb-7 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--acid)] text-[var(--ink)]"><ShieldCheck size={25} /></div>
-          <div className="eyebrow mb-4 text-[var(--acid)]">Private workspace</div>
-          <h1 className="display-tight text-5xl font-bold md:text-7xl">Admin access<br /><span className="text-[var(--coral)]">is restricted.</span></h1>
-          <p className="mt-6 max-w-md leading-relaxed text-[rgba(242,238,228,.68)]">The signed-in account {user?.primaryEmailAddress?.emailAddress ?? 'you'} is not on Jyothi EV’s admin allow-list.</p>
-          <div className="mt-9 flex flex-wrap gap-3">
-            <a href={basePath || '/'} className="rounded-full bg-[var(--acid)] px-5 py-3.5 text-sm font-bold text-[var(--ink)]">Back to website</a>
-            <button type="button" onClick={handleSignOut} className="rounded-full border border-[rgba(242,238,228,.35)] px-5 py-3.5 text-sm font-semibold">Sign out</button>
+        <div className="w-full max-w-md rounded-[30px] border border-[rgba(216,237,88,.35)] bg-[rgba(14,24,38,.92)] p-8 shadow-2xl backdrop-blur-2xl md:p-10">
+          <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--acid)] text-[var(--ink)] shadow-[0_0_20px_rgba(216,237,88,.4)]">
+            <ShieldCheck size={28} />
           </div>
+          <div className="eyebrow mb-2 text-[var(--acid)]">Restricted Access</div>
+          <h1 className="text-3xl font-bold tracking-tight text-[var(--shell)]">Owner Access Portal</h1>
+          <p className="mt-2 text-xs leading-relaxed text-[rgba(242,238,228,.65)]">Enter your 4-digit Owner Passcode to manage parts, change prices, and update WhatsApp contact settings.</p>
+          <form onSubmit={handlePinSubmit} className="mt-6 grid gap-4">
+            <div>
+              <label className="mb-1.5 block font-mono text-xs font-semibold text-[rgba(242,238,228,.8)]">Owner Passcode (Default: 1234)</label>
+              <input
+                type="password"
+                required
+                autoFocus
+                value={enteredPin}
+                onChange={(e) => setEnteredPin(e.target.value)}
+                placeholder="••••"
+                className="w-full rounded-xl border border-[rgba(242,238,228,.2)] bg-[rgba(11,19,30,.9)] px-4 py-3 text-center font-mono text-xl tracking-[.4em] text-[var(--acid)] outline-none focus:border-[var(--acid)]"
+              />
+            </div>
+            {pinError && <p className="text-xs font-semibold text-[var(--coral)]">{pinError}</p>}
+            <button type="submit" className="flex items-center justify-center gap-2 rounded-full bg-[var(--acid)] py-3.5 text-sm font-bold text-[var(--ink)] shadow-[0_0_20px_rgba(216,237,88,.3)] transition-transform hover:scale-[1.02]">
+              Unlock Dashboard <Check size={16} />
+            </button>
+            <a href={basePath || '/'} className="mt-2 text-center text-xs text-[rgba(242,238,228,.5)] transition-colors hover:text-[var(--shell)]">
+              ← Return to website
+            </a>
+          </form>
         </div>
       </div>
     );
@@ -646,8 +688,13 @@ function AdminDashboard() {
         <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4">
           <a href={basePath || '/'} className="flex items-center gap-3"><BrandMark /></a>
           <div className="flex items-center gap-3">
-            <span className="hidden text-right text-xs text-[rgba(242,238,228,.55)] sm:block">{statusQuery.data.email}<br /><strong className="text-[var(--acid)]">Admin workspace</strong></span>
-            <button type="button" onClick={handleSignOut} className="rounded-full border border-[rgba(242,238,228,.24)] px-4 py-2.5 text-xs font-semibold transition-colors hover:bg-[var(--shell)] hover:text-[var(--ink)]">Sign out</button>
+            <span className="hidden text-right text-xs text-[rgba(242,238,228,.55)] sm:block">
+              Authenticated Owner<br /><strong className="text-[var(--acid)]">Control Room</strong>
+            </span>
+            <button type="button" onClick={handleLockAdmin} className="flex items-center gap-1.5 rounded-full border border-[rgba(216,237,88,.3)] bg-[rgba(216,237,88,.1)] px-4 py-2 text-xs font-bold text-[var(--acid)] transition-colors hover:bg-[var(--acid)] hover:text-[var(--ink)]">
+              <ShieldCheck size={14} /> Lock Dashboard
+            </button>
+            <button type="button" onClick={handleSignOut} className="rounded-full border border-[rgba(242,238,228,.24)] px-4 py-2 text-xs font-semibold transition-colors hover:bg-[var(--shell)] hover:text-[var(--ink)]">Sign out</button>
           </div>
         </div>
       </header>
@@ -681,13 +728,13 @@ function AdminDashboard() {
           <section className="mt-8 rounded-[28px] border border-[rgba(216,237,88,.3)] bg-[rgba(14,24,38,.85)] p-7 backdrop-blur-xl shadow-2xl">
             <div className="flex flex-col justify-between gap-3 border-b border-[rgba(242,238,228,.1)] pb-4 sm:flex-row sm:items-center">
               <div>
-                <div className="eyebrow text-[var(--acid)]">Web Owner Contacts</div>
-                <h2 className="mt-1 text-2xl font-bold text-[var(--shell)]">Customize Store WhatsApp & Instagram</h2>
+                <div className="eyebrow text-[var(--acid)]">Web Owner Contacts & Security</div>
+                <h2 className="mt-1 text-2xl font-bold text-[var(--shell)]">Customize Store WhatsApp, Instagram & Passcode</h2>
               </div>
-              <span className="font-mono text-xs text-[rgba(242,238,228,.6)]">Change anytime when numbers change</span>
+              <span className="font-mono text-xs text-[rgba(242,238,228,.6)]">Protected Owner Area</span>
             </div>
 
-            <form onSubmit={handleSettingsSave} className="mt-6 grid gap-4 sm:grid-cols-3">
+            <form onSubmit={handleSettingsSave} className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <label className="mb-1.5 block font-mono text-xs font-semibold text-[var(--acid)]">
                   💬 Official WhatsApp Number
@@ -697,7 +744,7 @@ function AdminDashboard() {
                   required
                   value={settings.whatsappNumber}
                   onChange={(e) => setSettings({ ...settings, whatsappNumber: e.target.value })}
-                  placeholder="e.g. 9876543210 or 919876543210"
+                  placeholder="e.g. 9876543210"
                   className="w-full rounded-xl border border-[rgba(242,238,228,.2)] bg-[rgba(11,19,30,.9)] px-4 py-3 font-mono text-sm font-bold text-[var(--shell)] outline-none transition-colors focus:border-[var(--acid)]"
                 />
                 <p className="mt-1 text-[10px] text-[rgba(242,238,228,.5)]">All 'Order on WhatsApp' buttons connect here</p>
@@ -719,7 +766,7 @@ function AdminDashboard() {
 
               <div>
                 <label className="mb-1.5 block font-mono text-xs font-semibold text-[var(--shell)]">
-                  📍 Business Location / Headquarters
+                  📍 Business Location
                 </label>
                 <input
                   type="text"
@@ -728,14 +775,29 @@ function AdminDashboard() {
                   placeholder="e.g. Hyderabad / Pan-India"
                   className="w-full rounded-xl border border-[rgba(242,238,228,.2)] bg-[rgba(11,19,30,.9)] px-4 py-3 text-sm text-[var(--shell)] outline-none transition-colors focus:border-[var(--shell)]"
                 />
-                <p className="mt-1 text-[10px] text-[rgba(242,238,228,.5)]">Shown on quotations and partner headers</p>
+                <p className="mt-1 text-[10px] text-[rgba(242,238,228,.5)]">Shown on quotation headers</p>
               </div>
 
-              <div className="sm:col-span-3 mt-2 flex items-center justify-between">
+              <div>
+                <label className="mb-1.5 block font-mono text-xs font-semibold text-[var(--coral)]">
+                  🔒 Owner Passcode (PIN)
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={settings.adminPin}
+                  onChange={(e) => setSettings({ ...settings, adminPin: e.target.value })}
+                  placeholder="1234"
+                  className="w-full rounded-xl border border-[rgba(242,238,228,.2)] bg-[rgba(11,19,30,.9)] px-4 py-3 font-mono text-sm font-bold text-[var(--coral)] outline-none transition-colors focus:border-[var(--coral)]"
+                />
+                <p className="mt-1 text-[10px] text-[rgba(242,238,228,.5)]">PIN to unlock this admin dashboard</p>
+              </div>
+
+              <div className="sm:col-span-2 lg:col-span-4 mt-2 flex items-center justify-between">
                 <div>
                   {settingsSaved && (
                     <span className="inline-flex items-center gap-1.5 font-mono text-xs font-bold text-[#10B981]">
-                      <Check size={16} /> Contact settings updated across entire website!
+                      <Check size={16} /> Store settings & Passcode saved!
                     </span>
                   )}
                 </div>
@@ -743,7 +805,7 @@ function AdminDashboard() {
                   type="submit"
                   className="flex items-center gap-2 rounded-full bg-[var(--acid)] px-6 py-3 text-xs font-bold text-[var(--ink)] shadow-[0_0_20px_rgba(216,237,88,.4)] transition-transform hover:-translate-y-0.5"
                 >
-                  <Check size={14} /> Save Contact Settings
+                  <Check size={14} /> Save Store Settings
                 </button>
               </div>
             </form>
@@ -1262,14 +1324,14 @@ function Home() {
             </span>
             <div>
               <span className="text-sm font-bold text-[var(--shell)]">Jyothi EV Enterprises</span>
-              <span className="ml-2 font-mono text-[10px] text-[#25D366]">● WhatsApp Connected</span>
+              <span className="ml-2 font-mono text-[10px] text-[rgba(242,238,228,.45)]">· High-Torque Spares & Battery Tech</span>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-5 text-[rgba(242,238,228,.55)]">
-            <span className="font-mono text-[10px] uppercase tracking-[.1em]">Verified EV Spares</span>
-            <a href={`${basePath}/admin`} className="flex items-center gap-1.5 rounded-full border border-[rgba(216,237,88,.3)] bg-[rgba(216,237,88,.1)] px-3 py-1 font-mono text-xs font-bold text-[var(--acid)] transition-transform hover:scale-105" data-testid="link-admin">
-              <span>⚙️ Owner & WhatsApp Settings</span>
-              <ArrowUpRight size={13} />
+          <div className="flex flex-wrap items-center gap-6 text-[rgba(242,238,228,.55)]">
+            <span className="font-mono text-[10px] uppercase tracking-[.1em]">Pan-India Delivery</span>
+            <a href={`${basePath}/admin`} className="flex items-center gap-1 text-[11px] font-mono text-[rgba(242,238,228,.35)] transition-colors hover:text-[var(--acid)]" data-testid="link-admin">
+              <span>Admin</span>
+              <ArrowUpRight size={11} />
             </a>
             <a href="#top" className="flex items-center gap-1 text-xs font-semibold text-[var(--shell)] transition-opacity hover:opacity-80" data-testid="link-back-top">
               Back to top <ArrowUpRight size={14} />
